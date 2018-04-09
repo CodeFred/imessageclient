@@ -1,7 +1,7 @@
 var sqlite3 = require('sqlite3').verbose();
 var fs = require("fs");
-var dir = process.env.HOME + '/Library/Messages/';
-var file = process.env.HOME + '/Library/Messages/chat.db';
+var dir = process.env.CHAT_DIR || (process.env.HOME + '/Library/Messages/');
+var file = process.env.CHAT_FILE || (process.env.HOME + '/Library/Messages/chat.db');
 var blessed = require("blessed");
 var applescript = require("./applescript/lib/applescript.js");
 var exec = require('exec');
@@ -154,7 +154,9 @@ outputBox = blessed.list({
 getChats();
 
 // make sure we have assistive access enabled
-assistiveAccessCheck();
+if (!(process.env.READ_ONLY)) {
+    assistiveAccessCheck();
+}
 
 // Allow scrolling with the mousewheel (manually).
 chatList.on('wheeldown', function() {
@@ -179,15 +181,17 @@ screen.key('q', function(ch, key) {
 });
 
 // e button sends enter to Messages.app
-screen.key('e', function(ch, key) {
-	applescript.execFile(__dirname + '/send_return.AppleScript', [], function(err, result) {
-		if (err) {
-			throw err;
-		}
+if (!(process.env.READ_ONLY)) {
+    screen.key('e', function(ch, key) {
+        applescript.execFile(__dirname + '/send_return.AppleScript', [], function(err, result) {
+            if (err) {
+                throw err;
+            }
 
-		screen.render();
-	});
-});
+            screen.render();
+        });
+    });
+}
 
 // tab button switches focus
 screen.key('tab', function(ch, key) {
@@ -225,48 +229,50 @@ screen.key('.', function(ch, key) {
 });
 
 // n creates a new conversation
-screen.key('n', function(ch, key) {
-	var newChatBox = blessed.textarea({
-		parent: screen,
-		// Possibly support:
-		// align: 'center',
-		fg: 'blue',
-		height: '15%',
-		border: {
-			type: 'line'
-		},
-		width: '75%',
-		top: '35%',
-		left: '12.5%',
-		label: "New Conversation - type in contact iMessage info and hit enter"
-	});
+if (!(process.env.READ_ONLY)) {
+    screen.key('n', function(ch, key) {
+        var newChatBox = blessed.textarea({
+            parent: screen,
+            // Possibly support:
+            // align: 'center',
+            fg: 'blue',
+            height: '15%',
+            border: {
+                type: 'line'
+            },
+            width: '75%',
+            top: '35%',
+            left: '12.5%',
+            label: "New Conversation - type in contact iMessage info and hit enter"
+        });
 
-	newChatBox.on('focus', function() {
-		newChatBox.readInput(function(data) {});
+        newChatBox.on('focus', function() {
+            newChatBox.readInput(function(data) {});
 
-		newChatBox.key('enter', function(ch, key) {
-			var sendTo = newChatBox.getValue();
-			newChatBox.detach();
-			inputBox.focus();
-			selectedChatBox.setContent(sendTo);
-			SELECTED_CHATTER = sendTo;
-			screen.render();
-		});
+            newChatBox.key('enter', function(ch, key) {
+                var sendTo = newChatBox.getValue();
+                newChatBox.detach();
+                inputBox.focus();
+                selectedChatBox.setContent(sendTo);
+                SELECTED_CHATTER = sendTo;
+                screen.render();
+            });
 
-		newChatBox.key('esc', function(ch, key) {
-			newChatBox.detach();
-			chatList.focus();
-			screen.render();
-		});
+            newChatBox.key('esc', function(ch, key) {
+                newChatBox.detach();
+                chatList.focus();
+                screen.render();
+            });
 
-		newChatBox.key('tab', function(ch, key) {
+            newChatBox.key('tab', function(ch, key) {
 
-		});
-	});
-	newChatBox.focus();
+            });
+        });
+        newChatBox.focus();
 
-	screen.render();
-})
+        screen.render();
+    })
+}
 
 // handler for input textbox focus
 var inputBoxFocusHandler = function() {
