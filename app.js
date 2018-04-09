@@ -2,8 +2,8 @@ var sqlite3 = require('sqlite3').verbose();
 var fs = require("fs");
 var dir = process.env.CHAT_DIR || (process.env.HOME + '/Library/Messages/');
 var file = process.env.CHAT_FILE || (process.env.HOME + '/Library/Messages/chat.db');
+var contacts = process.env.ADDRESS_BOOK || (process.env.HOME + '/Library/Application\ Support/AddressBook/**/AddressBook-v22.abcddb');
 var blessed = require("blessed");
-var applescript = require("./applescript/lib/applescript.js");
 var exec = require('exec');
 var glob = require('glob');
 var imessagemodule = require("imessagemodule");
@@ -11,8 +11,9 @@ var imessagemodule = require("imessagemodule");
 // blessed elements
 var chatList;
 var selectedChatBox;
-var inputBox;
 var outputBox;
+
+const OSX_EPOCH = 978307200;
 
 var exists = fs.existsSync(file);
 if (!exists) {
@@ -43,23 +44,6 @@ exec('defaults read NSGlobalDomain AppleKeyboardUIMode', function(err, out, code
 		FULL_KEYBOARD_ACCESS = true;
 	}
 });
-
-// make sure assistive access is set up
-function assistiveAccessCheck() {
-	// first check if assistive access is turned on
-	applescript.execFile(__dirname+'/assistive.AppleScript', [true], function(err, result) {
-		if (err) {
-			try {
-				outputBox.setItems(["This program requires OS X Assistive Access, which is currently disabled.", "Opening Assistive Access now... (You may be asked to enter your password.)", "note: to run locally, enable access to Terminal or iTerm2, to run over SSH, enable access to sshd_keygen_wrapper."]);
-				screen.render();
-				applescript.execFile(__dirname+'/assistive.AppleScript', [false], function(err, result) {});
-			} catch (error) {
-				// I believe this might happen with old versions of OS X
-				console.log('if you are seeing this text, please file an issue at https://github.com/CamHenlin/imessageclient/issues including your OS X version number and any problems you are encountering.')
-			}
-		}
-	});
-};
 
 // read the Messages.app sqlite db
 var db = new sqlite3.Database(file);
@@ -109,37 +93,23 @@ selectedChatBox = blessed.box({
 	// Possibly support:
 	align: 'center',
 	fg: 'cyan',
-	height: '5%',
+	height: '4%',
 	width: '75%',
 	top: '0',
 	left: '0',
 	content: ""
 });
 
-// box at bottom for chat input
-inputBox = blessed.textbox({
-	parent: screen,
-	fg: 'cyan',
-	height: '15%',
-	label: 'iMessage',
-	border: {
-		type: 'line'
-	},
-	width: '75%',
-	bottom: '0',
-	left: '0'
-});
-
 // main chat box
 outputBox = blessed.list({
 	parent: screen,
 	fg: 'cyan',
-	height: '82%',
+	//height: '97%',
 	border: {
 		type: 'line'
 	},
 	width: '75%',
-	top: '5%',
+	top: '4%',
 	left: '0',
 
 	// Allow mouse support
@@ -152,11 +122,6 @@ outputBox = blessed.list({
 
 // load initial chats list
 getChats();
-
-// make sure we have assistive access enabled
-if (!(process.env.READ_ONLY)) {
-    assistiveAccessCheck();
-}
 
 // Allow scrolling with the mousewheel (manually).
 chatList.on('wheeldown', function() {
@@ -175,33 +140,11 @@ outputBox.on('wheelup', function() {
 	outputBox.up();
 });
 
+outputBox.focus();
+
 // q button quits
 screen.key('q', function(ch, key) {
 	return process.exit(0);
-});
-
-// e button sends enter to Messages.app
-if (!(process.env.READ_ONLY)) {
-    screen.key('e', function(ch, key) {
-        applescript.execFile(__dirname + '/send_return.AppleScript', [], function(err, result) {
-            if (err) {
-                throw err;
-            }
-
-            screen.render();
-        });
-    });
-}
-
-// tab button switches focus
-screen.key('tab', function(ch, key) {
-	if (chatList.focused) {
-		inputBox.focus();
-	} else {
-		chatList.focus();
-	}
-
-	screen.render();
 });
 
 // r button enables other services
@@ -217,89 +160,33 @@ screen.key('r', function(ch, key) {
 });
 
 // not 100% sure why this doesnt work, should scroll up conversation
-screen.key(',', function(ch, key) {
-	outputBox.up();
+screen.key('p', function(ch, key) {
+	chatList.select(-1);
 	screen.render();
 });
 
 // not 100% sure why this doesnt work, should scroll down conversation
-screen.key('.', function(ch, key) {
-	outputBox.down();
+screen.key('n', function(ch, key) {
+    chatList.select(1);
 	screen.render();
 });
 
-// n creates a new conversation
-if (!(process.env.READ_ONLY)) {
-    screen.key('n', function(ch, key) {
-        var newChatBox = blessed.textarea({
-            parent: screen,
-            // Possibly support:
-            // align: 'center',
-            fg: 'blue',
-            height: '15%',
-            border: {
-                type: 'line'
-            },
-            width: '75%',
-            top: '35%',
-            left: '12.5%',
-            label: "New Conversation - type in contact iMessage info and hit enter"
-        });
+screen.key('pagedown', function(ch, key) {
+    outputBox.select(outputBox.height);
+	screen.render();
+});
 
-        newChatBox.on('focus', function() {
-            newChatBox.readInput(function(data) {});
-
-            newChatBox.key('enter', function(ch, key) {
-                var sendTo = newChatBox.getValue();
-                newChatBox.detach();
-                inputBox.focus();
-                selectedChatBox.setContent(sendTo);
-                SELECTED_CHATTER = sendTo;
-                screen.render();
-            });
-
-            newChatBox.key('esc', function(ch, key) {
-                newChatBox.detach();
-                chatList.focus();
-                screen.render();
-            });
-
-            newChatBox.key('tab', function(ch, key) {
-
-            });
-        });
-        newChatBox.focus();
-
-        screen.render();
-    })
-}
-
-// handler for input textbox focus
-var inputBoxFocusHandler = function() {
-	inputBox.readInput(function(data) {});
-
-	inputBox.key('enter', function(ch, key) {
-		if (SELECTED_CHATTER === "") {
-			return;
-		}
-
-		var message = inputBox.getValue();
-		sendMessage(SELECTED_CHATTER, message);
-		inputBox.setValue("");
-		inputBox.unkey('enter');
-
-		inputBoxFocusHandler();
-	});
-
-	inputBox.key('tab', function(ch, key) {
-		inputBox.unkey('enter');
-		chatList.focus();
-	});
-};
-inputBox.on('focus', inputBoxFocusHandler);
+screen.key('pageup', function(ch, key) {
+    outputBox.select(-outputBox.height);
+	screen.render();
+});
 
 // handler for when a conversation is selected
 chatList.on('select', function(data) {
+    selectChat(data);
+});
+
+function selectChat(data) {
 	chatSet = true;
 	// we don't want to try to get the name of groupchats
 	if (chatList.getItem(data.index-2).content.indexOf('-chat') > -1) {
@@ -333,7 +220,7 @@ chatList.on('select', function(data) {
 	}
 	getAllMessagesInCurrentChat();
 	screen.render();
-});
+}
 
 function getNameFromPhone(phone, callback) {
 	phone = phone.replace(/\(/g,'').replace(/\)/g,'').replace(/\-/g,'').replace(/\ /g,'').replace(/\+/g,'');
@@ -350,7 +237,7 @@ function getNameFromPhone(phone, callback) {
 	// comment out if you want to debug for another locality:
 	// throw new Error(phone);
 
-	glob(process.env.HOME + '/Library/Application\ Support/AddressBook/**/AddressBook-v22.abcddb', function (er, files) {
+	glob(contacts, function (er, files) {
 		var found = false;
 
 		for (var i = 0; i < files.length; i++) {
@@ -421,9 +308,9 @@ function getChats() {
 function getAllMessagesInCurrentChat() {
 	var SQL = "";
 	if (GROUPCHAT_SELECTED) { // this is a group chat
-		SQL = "SELECT DISTINCT message.ROWID, handle.id, message.text, message.is_from_me, message.date, message.date_delivered, message.date_read FROM message LEFT OUTER JOIN chat ON chat.room_name = message.cache_roomnames LEFT OUTER JOIN handle ON handle.ROWID = message.handle_id WHERE message.service = 'iMessage' AND chat.chat_identifier = '"+SELECTED_CHATTER+"' ORDER BY message.date DESC LIMIT 500";
+		SQL = "SELECT DISTINCT message.ROWID, handle.id, message.text, message.is_from_me, datetime(message.date / 1000000000 + strftime('%s', '2001-01-01 00:00:00'), 'unixepoch', 'localtime') as msgdate, message.date, message.date_delivered, message.date_read FROM message LEFT OUTER JOIN chat ON chat.room_name = message.cache_roomnames LEFT OUTER JOIN handle ON handle.ROWID = message.handle_id WHERE message.service = 'iMessage' AND chat.chat_identifier = '"+SELECTED_CHATTER+"' ORDER BY msgdate ASC";
 	} else { // this is one person
-		SQL = "SELECT DISTINCT message.ROWID, handle.id, message.text, message.is_from_me, message.date, message.date_delivered, message.date_read FROM message LEFT OUTER JOIN chat ON chat.room_name = message.cache_roomnames LEFT OUTER JOIN handle ON handle.ROWID = message.handle_id WHERE message.service = 'iMessage' AND handle.id = '"+SELECTED_CHATTER+"' ORDER BY message.date DESC LIMIT 500";
+		SQL = "SELECT DISTINCT message.ROWID, handle.id, message.text, message.is_from_me, datetime(message.date / 1000000000 + strftime('%s', '2001-01-01 00:00:00'), 'unixepoch', 'localtime') as msgdate, message.date, message.date_delivered, message.date_read FROM message LEFT OUTER JOIN chat ON chat.room_name = message.cache_roomnames LEFT OUTER JOIN handle ON handle.ROWID = message.handle_id WHERE message.service = 'iMessage' AND handle.id = '"+SELECTED_CHATTER+"' ORDER BY msgdate ASC";
 	}
 
 	if (ENABLE_OTHER_SERVICES) {
@@ -437,7 +324,7 @@ function getAllMessagesInCurrentChat() {
 			for (var i = 0; i < rows.length; i++) {
 				var row = rows[i];
 				LAST_SEEN_CHAT_ID = row.ROWID;
-				arr.push(((!row.is_from_me) ? row.id : "me") + ": " + row.text);
+				arr.push(row.msgdate + ' - ' + ((!row.is_from_me) ? row.id : "me") + ": " + row.text);
 				if (row.is_from_me) {
 					MY_APPLE_ID = row.id;
 				}
@@ -449,18 +336,6 @@ function getAllMessagesInCurrentChat() {
 			screen.render();
 		});
 	});
-}
-
-function sendMessage(to, message) {
-	if (sending) { return; }
-	sending = true;
-
-	if (GROUPCHAT_SELECTED) {
-		imessagemodule.sendMessage(SELECTED_GROUP.split('-chat')[0], message);
-	} else {
-		imessagemodule.sendMessage(to, message);
-	}
-	sending = false;
 }
 
 setInterval(function() {
